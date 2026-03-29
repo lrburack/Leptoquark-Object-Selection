@@ -5,12 +5,10 @@ import sys
 import os
 import awkward as ak
 import re
-from helpers import dr, dr_ak, invariant_mass, invariant_mass_pairwise
+from helpers import dr, dr_ak, invariant_mass_pairwise
 from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.utils.class_weight import compute_class_weight
-from sklearn.model_selection import train_test_split
 from Classifier import FinalModel
 
 # sample file: processed_Signal_LQToBMu_M_500_single.root
@@ -18,8 +16,7 @@ from Classifier import FinalModel
 
 match = re.search(r"_M_(\d+)", sys.argv[1])
 masspoints = [int(match.group(1))]
-nmuoncand = 4
-njetcand = 3
+model = FinalModel(nmuons=3, njets=4)
 
 # Used to get rid of the cases where the creation muon = signal muon
 mu_idx = np.arange(nmuoncand)
@@ -27,7 +24,7 @@ mask = mu_idx[:, None] != mu_idx[None, :]
 
 run_name = f"test4_M{masspoints[0]}"
 signal_path = "/Users/lrburack/Documents/CERN/Leptoquark/processed_withbtag/"
-results_file = "simultaneous_results.pkl"
+results_file = "training_results.pkl"
 save_fig = f"algo_figures/{run_name}.png"
 model_save_path = f"models/{run_name}.pkl"
 

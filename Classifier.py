@@ -1,6 +1,7 @@
 import numpy as np
 import awkward as ak
-from helpers import dr_ak, invariant_mass_pairwise
+from helpers import dr, invariant_mass
+from itertools import product
 
 class Classifier:
     def __init__(self):
@@ -9,13 +10,104 @@ class Classifier:
     def predict(self, event):
         raise NotImplementedError("Subclasses should implement this method.")
 
-
 class FinalModel(Classifier):
-    def __init__(self, trained_model, nmuons, njets):
+    def __init__(self, nmuons, njets):
         super().__init__()
         self.nmuons = nmuons
         self.njets = njets
-        self.trained_model = trained_model
+        self.trained_model = None
+
+    def jet_cands(self, events):
+        jet_conditions = events["Jet_jetId"] >= 6
+        jetranks   = ak.argsort(ak.where(jet_conditions, events["Jet_pt"], -1e9), axis=1, ascending=False)
+        cand_jets = ak.pad_none(jetranks, self.njets, axis=1, clip=True)
+        return ak.fill_none(cand_jets, -1)
+    
+    def muon_cands(self, events):
+        muonranks = ak.argsort(events["Muon_pt"], axis=1, ascending=False)
+        cand_muons = ak.pad_none(muonranks, self.nmuons, axis=1, clip=True)
+        return ak.fill_none(cand_muons, -1)
+    
+    def build_features_vectorized(self, events):
+        nevents = len(events["Muon_pt"])
+        nmuons = self.nmuons
+        njets = self.njets
+
+        cand_jets = self.jet_cands(events)
+        cand_muons = self.muon_cands(events)
+
+        # cand_muons is an array of shape nevents x nmuons
+        # For each event, it should contain indices to muons, with indices listed in decending order of pT
+        # In cases where a event has less than nmuons, uh oh
+
+        triplets = [(m1, m2, j) for m1, m2, j in product(range(nmuons), range(nmuons), range(njets)) if m1 != m2]
+        # This has length ncombinations. Each row tells you which objects are in the row
+        # For example row 0 is (0 1 0), meaning it corresponds to signal mu rank 1, creation mu rank 2, jet rank 1.
+        triplet_indices = np.array(triplets)
+        # These tell you which objects are in each row. 
+        m1_idx = triplet_indices[:, 0] # i.e. in the i'th combination, the signal muon's pt rank is m1_idx[i]
+        m2_idx = triplet_indices[:, 1]
+        j_idx  = triplet_indices[:, 2]
+
+        # --- Helper to pad, fill, and convert to numpy ---
+        def get_candidate_properties(arr, cands):
+            maxlength = ak.max(ak.num(arr, axis=1))
+            padded = ak.pad_none(arr, maxlength + 1, axis=1)
+            return padded[np.arange(len(padded))[:, None], cands]
+
+        # --- Extract padded candidate arrays once ---
+        mu_pt  = get_candidate_properties(events["Muon_pt"], cand_muons)
+        mu_eta = get_candidate_properties(events["Muon_eta"], cand_muons)
+        mu_phi = get_candidate_properties(events["Muon_phi"], cand_muons)
+
+        j_pt   = get_candidate_properties(events["Jet_pt"], cand_jets)
+        j_eta  = get_candidate_properties(events["Jet_eta"], cand_jets)
+        j_phi  = get_candidate_properties(events["Jet_phi"], cand_jets)
+        j_btag = get_candidate_properties(events["Jet_btagDeepFlavB"], cand_jets)
+
+        # --- Compute features for each triplet ---
+        # Ranks are just candidate-list position + 1 (since candidates are
+        # already sorted by pt), broadcast to (nevents, ncomb).
+        ones = np.ones((nevents, 1), dtype=np.float32)
+
+        # Build the features array
+        X = np.stack([
+            # 0: signal muon pt
+            mu_pt[:, m1_idx],
+            # 1: creation muon pt
+            mu_pt[:, m2_idx],
+            # 2: jet pt
+            j_pt[:, j_idx],
+            # 3: signal muon pt rank
+            ones * (m1_idx + 1).astype(np.float32),
+            # 4: creation muon pt rank
+            ones * (m2_idx + 1).astype(np.float32),
+            # 5: jet pt rank
+            ones * (j_idx + 1).astype(np.float32),
+            # 6: dR(signal muon, jet)
+            dr(mu_eta[:, m1_idx], mu_phi[:, m1_idx],
+                j_eta[:, j_idx],   j_phi[:, j_idx]),
+            # 7: dR(creation muon, jet)
+            dr(mu_eta[:, m2_idx], mu_phi[:, m2_idx],
+                j_eta[:, j_idx],   j_phi[:, j_idx]),
+            # 8: dR(signal muon, creation muon)
+            dr(mu_eta[:, m1_idx], mu_phi[:, m1_idx],
+                mu_eta[:, m2_idx], mu_phi[:, m2_idx]),
+            # 9: invariant mass(signal muon, jet)
+            invariant_mass(mu_pt[:, m1_idx], mu_eta[:, m1_idx], mu_phi[:, m1_idx],
+                        j_pt[:, j_idx],   j_eta[:, j_idx],   j_phi[:, j_idx]),
+            # 10: invariant mass(creation muon, jet)
+            invariant_mass(mu_pt[:, m2_idx], mu_eta[:, m2_idx], mu_phi[:, m2_idx],
+                        j_pt[:, j_idx],   j_eta[:, j_idx],   j_phi[:, j_idx]),
+            # 11: jet b-tag score
+            j_btag[:, j_idx],
+        ], axis=-1)  # shape: (nevents, ncomb, 12)
+
+        # --- Replace any dR == 0 with -1 (padding sentinel) ---
+        # dr_features = X[:, :, 6:9]
+        # dr_features[dr_features == 0] = -1
+
+        return np.array(X)
 
     def predict(self, event):
         nmuoncand = self.nmuons
