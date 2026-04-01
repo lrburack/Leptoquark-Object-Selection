@@ -3,6 +3,7 @@ import uproot
 import os
 import sys
 import pickle
+from config import SIGNAL_SAMPLES_PATH, USE_BRANCHES, PROCESSED_SAMPLES_PATH
 
 # Ground Truth: This script processes samples into a format usable for training a classification model
 # It takes a root file and outputs a pickled dictionary with relevant kinematics and ground truth classification.
@@ -42,23 +43,16 @@ file = sys.argv[1]
 nevents = 10000
 print_every = 100
 
-# signal_path = "/eos/cms/store/group/phys_susy/LQ2/LQ_2017merged/"
-# outpath = f"/afs/cern.ch/user/l/lburack/work/lq/selection_studies/processed/"
-signal_path = "/Users/lrburack/Documents/CERN/Leptoquark/samples/LQ_2017merged/"
-outpath = f"/Users/lrburack/Documents/CERN/Leptoquark/processed_withbtag"
+signal_path = SIGNAL_SAMPLES_PATH
+outpath = PROCESSED_SAMPLES_PATH
 os.makedirs(outpath, exist_ok=True)
 
 uproot_file = uproot.open(os.path.join(signal_path, file))
 branches = uproot_file["Events"].keys()
-print(branches)
-asdf
+
 # There are a lot of branches and we dont need them all. 
-branches_to_load = [branch for branch in branches if "GenPart" in branch]
-branches_to_load += ["Muon_eta", "Muon_phi", "Muon_pt", "Muon_genPartIdx", "nMuon"]
-branches_to_load += ["Jet_eta", "Jet_phi", "Jet_pt", "nJet", "Jet_genJetIdx", "Jet_jetId", "Jet_btagDeepFlavB"]
-print(branches_to_load)
 events = {
-    branch: uproot_file["Events"][branch].array()[:nevents] for branch in branches_to_load
+    branch: uproot_file["Events"][branch].array()[:nevents] for branch in USE_BRANCHES
 }
 # Add extra branches for the ground truth objects that we will fill in
 events.update({

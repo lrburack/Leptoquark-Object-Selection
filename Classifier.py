@@ -2,20 +2,32 @@ import numpy as np
 import awkward as ak
 from helpers import dr, invariant_mass
 from itertools import product
+from sklearn.neural_network import MLPClassifier
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 
 class Classifier:
-    def __init__(self):
-        pass
+    def __init__(self, needs_training=False):
+        self.needs_training = needs_training
 
     def predict(self, event):
         raise NotImplementedError("Subclasses should implement this method.")
 
 class FinalModel(Classifier):
     def __init__(self, nmuons, njets):
-        super().__init__()
+        super().__init__(needs_training=True)
         self.nmuons = nmuons
         self.njets = njets
         self.trained_model = None
+
+        triplets = [(m1, m2, j) for m1, m2, j in product(range(nmuons), range(nmuons), range(njets)) if m1 != m2]
+        # This has length ncombinations. Each row tells you which objects are in the row
+        # For example row 0 is (0 1 0), meaning it corresponds to signal mu rank 1, creation mu rank 2, jet rank 1.
+        self.triplet_indices = np.array(triplets)
+        # These tell you which objects are in each row.
+        self.m1_idx = self.triplet_indices[:, 0] # i.e. in the i'th combination, the signal muon's pt rank is self.m1_idx[i]
+        self.m2_idx = self.triplet_indices[:, 1]
+        self.j_idx  = self.triplet_indices[:, 2]
 
     def jet_cands(self, events):
         jet_conditions = events["Jet_jetId"] >= 6
@@ -28,26 +40,13 @@ class FinalModel(Classifier):
         cand_muons = ak.pad_none(muonranks, self.nmuons, axis=1, clip=True)
         return ak.fill_none(cand_muons, -1)
     
-    def build_features_vectorized(self, events):
+    def build_features(self, events):
         nevents = len(events["Muon_pt"])
-        nmuons = self.nmuons
-        njets = self.njets
-
         cand_jets = self.jet_cands(events)
         cand_muons = self.muon_cands(events)
 
         # cand_muons is an array of shape nevents x nmuons
         # For each event, it should contain indices to muons, with indices listed in decending order of pT
-        # In cases where a event has less than nmuons, uh oh
-
-        triplets = [(m1, m2, j) for m1, m2, j in product(range(nmuons), range(nmuons), range(njets)) if m1 != m2]
-        # This has length ncombinations. Each row tells you which objects are in the row
-        # For example row 0 is (0 1 0), meaning it corresponds to signal mu rank 1, creation mu rank 2, jet rank 1.
-        triplet_indices = np.array(triplets)
-        # These tell you which objects are in each row. 
-        m1_idx = triplet_indices[:, 0] # i.e. in the i'th combination, the signal muon's pt rank is m1_idx[i]
-        m2_idx = triplet_indices[:, 1]
-        j_idx  = triplet_indices[:, 2]
 
         # --- Helper to pad, fill, and convert to numpy ---
         def get_candidate_properties(arr, cands):
@@ -73,148 +72,115 @@ class FinalModel(Classifier):
         # Build the features array
         X = np.stack([
             # 0: signal muon pt
-            mu_pt[:, m1_idx],
+            mu_pt[:, self.m1_idx],
             # 1: creation muon pt
-            mu_pt[:, m2_idx],
+            mu_pt[:, self.m2_idx],
             # 2: jet pt
-            j_pt[:, j_idx],
+            j_pt[:, self.j_idx],
             # 3: signal muon pt rank
-            ones * (m1_idx + 1).astype(np.float32),
+            ones * (self.m1_idx + 1).astype(np.float32),
             # 4: creation muon pt rank
-            ones * (m2_idx + 1).astype(np.float32),
+            ones * (self.m2_idx + 1).astype(np.float32),
             # 5: jet pt rank
-            ones * (j_idx + 1).astype(np.float32),
+            ones * (self.j_idx + 1).astype(np.float32),
             # 6: dR(signal muon, jet)
-            dr(mu_eta[:, m1_idx], mu_phi[:, m1_idx],
-                j_eta[:, j_idx],   j_phi[:, j_idx]),
+            dr(mu_eta[:, self.m1_idx], mu_phi[:, self.m1_idx],
+                j_eta[:, self.j_idx],   j_phi[:, self.j_idx]),
             # 7: dR(creation muon, jet)
-            dr(mu_eta[:, m2_idx], mu_phi[:, m2_idx],
-                j_eta[:, j_idx],   j_phi[:, j_idx]),
+            dr(mu_eta[:, self.m2_idx], mu_phi[:, self.m2_idx],
+                j_eta[:, self.j_idx],   j_phi[:, self.j_idx]),
             # 8: dR(signal muon, creation muon)
-            dr(mu_eta[:, m1_idx], mu_phi[:, m1_idx],
-                mu_eta[:, m2_idx], mu_phi[:, m2_idx]),
+            dr(mu_eta[:, self.m1_idx], mu_phi[:, self.m1_idx],
+                mu_eta[:, self.m2_idx], mu_phi[:, self.m2_idx]),
             # 9: invariant mass(signal muon, jet)
-            invariant_mass(mu_pt[:, m1_idx], mu_eta[:, m1_idx], mu_phi[:, m1_idx],
-                        j_pt[:, j_idx],   j_eta[:, j_idx],   j_phi[:, j_idx]),
+            invariant_mass(mu_pt[:, self.m1_idx], mu_eta[:, self.m1_idx], mu_phi[:, self.m1_idx],
+                        j_pt[:, self.j_idx],   j_eta[:, self.j_idx],   j_phi[:, self.j_idx]),
             # 10: invariant mass(creation muon, jet)
-            invariant_mass(mu_pt[:, m2_idx], mu_eta[:, m2_idx], mu_phi[:, m2_idx],
-                        j_pt[:, j_idx],   j_eta[:, j_idx],   j_phi[:, j_idx]),
+            invariant_mass(mu_pt[:, self.m2_idx], mu_eta[:, self.m2_idx], mu_phi[:, self.m2_idx],
+                        j_pt[:, self.j_idx],   j_eta[:, self.j_idx],   j_phi[:, self.j_idx]),
             # 11: jet b-tag score
-            j_btag[:, j_idx],
+            j_btag[:, self.j_idx],
         ], axis=-1)  # shape: (nevents, ncomb, 12)
-
-        # --- Replace any dR == 0 with -1 (padding sentinel) ---
-        # dr_features = X[:, :, 6:9]
-        # dr_features[dr_features == 0] = -1
 
         return np.array(X)
 
-    def predict(self, event):
-        nmuoncand = self.nmuons
-        njetcand = self.njets
+    def ground_truth(self, events):
+        cand_jets = self.jet_cands(events)
+        cand_muons = self.muon_cands(events)
 
-        # ── 1. Wrap scalar branches into awkward arrays (one-event "batch") ──
-        def aw(branch):
-            return ak.Array([list(branch)])
+        # Map candidate ranks to actual event-level indices
+        actual_m1 = cand_muons[:, self.m1_idx]  # shape (nevents, ncomb)
+        actual_m2 = cand_muons[:, self.m2_idx]
+        actual_j  = cand_jets[:, self.j_idx]
 
-        # ── 2. Select candidate muons (top-pt, same as training) ──
-        muon_pt   = aw(event.Muon_pt)
-        muon_eta  = aw(event.Muon_eta)
-        muon_phi  = aw(event.Muon_phi)
+        lq_mu  = events["reco_lq_muon"][:, np.newaxis] == actual_m1
+        lq_cre = events["reco_creation_muon"][:, np.newaxis] == actual_m2
+        lq_jet = events["reco_lq_jet"][:, np.newaxis] == actual_j
 
-        muonranks  = ak.argsort(muon_pt, axis=1, ascending=False)
-        cand_muons = (ak.local_index(muonranks, axis=1) < nmuoncand)[ak.argsort(muonranks, axis=1)]
+        return np.array(lq_mu), np.array(lq_cre), np.array(lq_jet)
 
-        # ── 3. Select candidate jets (jetId >= 6, top-pt, same as training) ──
-        jet_pt    = aw(event.Jet_pt)
-        jet_eta   = aw(event.Jet_eta)
-        jet_phi   = aw(event.Jet_phi)
-        jet_jetId = aw(event.Jet_jetId)
 
-        jet_conditions = jet_jetId >= 6
-        jetranks   = ak.argsort(ak.where(jet_conditions, jet_pt, -1e9), axis=1, ascending=False)
-        cand_jets  = ((ak.local_index(jetranks, axis=1) < njetcand)[ak.argsort(jetranks, axis=1)]) & jet_conditions
+    def train(self, train_data, train_labels):
+        mlp = Pipeline([
+            ("scaler", StandardScaler(with_mean=True, with_std=True)),
+            ("clf", MLPClassifier(
+                hidden_layer_sizes=(16, 16),   # small, fast
+                activation="relu",
+                solver="adam",
+                alpha=1e-3,
+                batch_size=1024,
+                max_iter=10000,                 # bump if you see ConvergenceWarning
+                random_state=42,
+                verbose=False,
+            ))
+        ])
 
-        # ── 4. Helper: pad & fill a masked array to a fixed length ──
-        def pad(arr, mask, n):
-            return ak.fill_none(
-                ak.pad_none(arr[mask], n, axis=1, clip=True), -1
-            ).to_numpy()  # shape (1, n)
+        mlp.fit(train_data, train_labels)
+        self.trained_model = mlp
 
-        m_pt   = pad(muon_pt,  cand_muons, nmuoncand)   # (1, nmuoncand)
-        m_eta  = pad(muon_eta, cand_muons, nmuoncand)
-        m_phi  = pad(muon_phi, cand_muons, nmuoncand)
-        j_pt   = pad(jet_pt,   cand_jets,  njetcand)    # (1, njetcand)
-        j_eta  = pad(jet_eta,  cand_jets,  njetcand)
-        j_phi  = pad(jet_phi,  cand_jets,  njetcand)
+    def predict(self, events, usetest=None):
+        features = self.build_features(events)
+        if usetest is None:
+            usetest = np.arange(len(events["Muon_pt"]))
 
-        m_rank = (ak.local_index(
-            ak.fill_none(ak.pad_none(muon_pt[cand_muons], nmuoncand, axis=1, clip=True), -1),
-            axis=1
-        ) + 1).to_numpy()
-        j_rank = (ak.local_index(
-            ak.fill_none(ak.pad_none(jet_pt[cand_jets], njetcand, axis=1, clip=True), -1),
-            axis=1
-        ) + 1).to_numpy()
+        cand_jets = self.jet_cands(events)
+        cand_muons = self.muon_cands(events)
+        
+        scores = np.full(np.shape(features)[0] * np.shape(features)[1], -1e9, dtype=np.float32) # shape (nevents, ncomb)
+        # Need to remove the cominations with nans (i.e. in events with less than nmuon muons or njet jets)
+        combinations_flattened = features.reshape(-1, features.shape[-1]) 
+        good_rows = ~np.any(np.isnan(combinations_flattened), axis=1)
 
-        # ── 5. Compute ΔR matrices ──
-        dr_muon_jet = dr_ak(m_eta, m_phi, j_eta, j_phi)   # (1, nmuoncand, njetcand)
-        dr_muon_jet[dr_muon_jet == 0] = -1
+        scores[good_rows] = self.trained_model.predict_proba(combinations_flattened[good_rows])[:,1]
+        scores = scores.reshape(features.shape[0], features.shape[1]) # reshape back to (nevents, ncomb)
+        best_combination_indices = np.argmax(scores, axis=1) # shape (nevents,)
+        best_m1_idx = self.m1_idx[best_combination_indices]
+        best_m2_idx = self.m2_idx[best_combination_indices]
+        best_j_idx  = self.j_idx[best_combination_indices]
 
-        dr_muon_muon = dr_ak(m_eta, m_phi, m_eta, m_phi)  # (1, nmuoncand, nmuoncand)
-        dr_muon_muon[dr_muon_muon == 0] = -1
+        return cand_muons[usetest, best_m1_idx], cand_jets[usetest, best_j_idx], cand_muons[usetest, best_m2_idx]
+    
+    def __str__(self):
+        return "NN_{}mu_{}jet".format(self.nmuons, self.njets)
 
-        # ── 6. Compute invariant-mass matrix ──
-        inv_mass = invariant_mass_pairwise(
-            m_pt, m_eta, m_phi,
-            j_pt, j_eta, j_phi,
-        )  # (1, nmuoncand, njetcand)
+class pt(Classifier):
+    def __init__(self):
+        super().__init__()
 
-        # ── 7. Build feature tensor X  (1, nmu, nmu, njet, 12) ──
-        nfeatures = 12
-        X = np.zeros((1, nmuoncand, nmuoncand, njetcand, nfeatures), dtype=np.float32)
-        X[:, :, :, :, 0]  = m_pt[:, :, np.newaxis, np.newaxis]       # signal muon pt
-        X[:, :, :, :, 1]  = m_pt[:, np.newaxis, :, np.newaxis]       # creation muon pt
-        X[:, :, :, :, 2]  = j_pt[:, np.newaxis, np.newaxis, :]       # jet pt
-        X[:, :, :, :, 3]  = m_rank[:, :, np.newaxis, np.newaxis]     # signal muon pt rank
-        X[:, :, :, :, 4]  = m_rank[:, np.newaxis, :, np.newaxis]     # creation muon pt rank
-        X[:, :, :, :, 5]  = j_rank[:, np.newaxis, np.newaxis, :]     # jet pt rank
-        X[:, :, :, :, 6]  = dr_muon_jet[:, :, np.newaxis, :]         # ΔR(signal μ, jet)
-        X[:, :, :, :, 7]  = dr_muon_jet[:, np.newaxis, :, :]         # ΔR(creation μ, jet)
-        X[:, :, :, :, 8]  = dr_muon_muon[:, :, :, np.newaxis]        # ΔR(signal μ, creation μ)
-        X[:, :, :, :, 9]  = inv_mass[:, :, np.newaxis, :]            # m(signal μ, jet)
-        X[:, :, :, :, 10] = inv_mass[:, np.newaxis, :, :]            # m(creation μ, jet)
-        X[:, :, :, :, 11] = ak.fill_none(ak.pad_none(ak.local_index(aw(event.Jet_btagDeepFlavB)[cand_jets]), self.njets, axis=1, clip=True), 0).to_numpy()[:, np.newaxis, np.newaxis, :]
+    def predict(self, events, usetest=None):
+        if usetest is None:
+            usetest = np.arange(len(events["Muon_pt"]))
+        lq_muon_index = np.argmax(events["Muon_pt"][usetest], axis=1)
+        
+        jet_conditions = events["Jet_jetId"][usetest] >= 6
+        jetranks   = ak.argsort(ak.where(jet_conditions, events["Jet_pt"][usetest], -1e9), axis=1, ascending=False)
+        lq_jet_index = jetranks[:, 0]  # take the leading jet that passes the jet ID
 
-        # ── 8. Mask diagonal (signal μ == creation μ is unphysical) ──
-        mu_idx = np.arange(nmuoncand)
-        mask   = mu_idx[:, None] != mu_idx[None, :]                   # (nmu, nmu) bool
-
-        X_masked = X[:, mask, :, :]                                   # (1, nmu*(nmu-1), njet, 11)
-        X_flat   = X_masked.reshape(-1, nfeatures)                    # flatten all combos
-
-        # ── 9. Score every combination, restore full shape ──
-        scores_masked = self.trained_model.predict_proba(X_flat)[:, 1]
-        scores_masked = scores_masked.reshape(1, nmuoncand * (nmuoncand - 1), njetcand)
-
-        scores_full = np.full((1, nmuoncand, nmuoncand, njetcand), -1000.0, dtype=np.float32)
-        scores_full[:, mask, :] = scores_masked
-
-        # ── 10. Pick the best (signal_mu, creation_mu, jet) combo ──
-        best = np.argmax(scores_full[0].ravel())
-        sig_mu_cand, cre_mu_cand, jet_cand = np.unravel_index(best, (nmuoncand, nmuoncand, njetcand))
-
-        # ── 11. Map candidate-local indices back to original event indices ──
-        padded_cand_muons = ak.fill_none(
-            ak.pad_none(ak.local_index(cand_muons)[cand_muons], nmuoncand, axis=1, clip=True), -1
-        ).to_numpy()[0]  # (nmuoncand,)
-
-        padded_cand_jets = ak.fill_none(
-            ak.pad_none(ak.local_index(cand_jets)[cand_jets], njetcand, axis=1, clip=True), -1
-        ).to_numpy()[0]  # (njetcand,)
-
-        lq_muon_index            = int(padded_cand_muons[sig_mu_cand])
-        initial_state_muon_index = int(padded_cand_muons[cre_mu_cand])
-        lq_jet_index             = int(padded_cand_jets[jet_cand])
+        has_two_muons = ak.num(events["Muon_pt"][usetest]) > 1
+        initial_state_muon_index = np.zeros(len(usetest), dtype=int)
+        initial_state_muon_index[has_two_muons] = np.argsort(events["Muon_pt"][usetest], axis=1)[has_two_muons][: , -2]
 
         return lq_muon_index, lq_jet_index, initial_state_muon_index
+    
+    def __str__(self):
+        return "pt"
