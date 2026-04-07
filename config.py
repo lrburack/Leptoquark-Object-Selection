@@ -1,9 +1,10 @@
 # Needed for running classification with a pretrained model 
-MODELS_DIRECTORY = "/Users/lrburack/Documents/CERN/Leptoquark/models"
+MODELS_DIRECTORY = "models"
 MODEL_FILENAME = "model.pkl"
 MODEL_PERFORMANCE = "performance.pkl"
+PERFORMANCE_PLOT_PATH = "performance_plots"
 
-MASSPOINTS = [500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000, 2100, 2200, 2300, 2400, 2500, 2600, 2700, 2800, 2900, 3000, 3500, 4000]
+MASSPOINTS = [300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000, 2100, 2200, 2300, 2400, 2500, 2600, 2700, 2800, 2900, 3000, 3500, 4000]
 USE_BRANCHES = ["GenPart_pt", "GenPart_eta", "GenPart_phi", "GenPart_genPartIdxMother", "GenPart_pdgId", "GenPart_status", "nGenPart"]
 USE_BRANCHES += ["Muon_eta", "Muon_phi", "Muon_pt", "Muon_genPartIdx", "nMuon"]
 USE_BRANCHES += ["Jet_eta", "Jet_phi", "Jet_pt", "nJet", "Jet_genJetIdx", "Jet_jetId", "Jet_btagDeepFlavB"]

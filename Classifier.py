@@ -100,7 +100,7 @@ class FinalModel(Classifier):
                         j_pt[:, self.j_idx],   j_eta[:, self.j_idx],   j_phi[:, self.j_idx]),
             # 11: jet b-tag score
             j_btag[:, self.j_idx],
-        ], axis=-1)  # shape: (nevents, ncomb, 12)
+        ], axis=-1)  # shape: (nevents, ncomb, nfeatures)
 
         return np.array(X)
 
@@ -142,17 +142,18 @@ class FinalModel(Classifier):
         features = self.build_features(events)
         if usetest is None:
             usetest = np.arange(len(events["Muon_pt"]))
+        features = features[usetest]  # shape (nevents, ncomb, nfeatures)
 
         cand_jets = self.jet_cands(events)
         cand_muons = self.muon_cands(events)
         
-        scores = np.full(np.shape(features)[0] * np.shape(features)[1], -1e9, dtype=np.float32) # shape (nevents, ncomb)
+        scores = np.full(len(usetest) * np.shape(features)[1], -1e9, dtype=np.float32) # length (nevents * ncomb)
         # Need to remove the cominations with nans (i.e. in events with less than nmuon muons or njet jets)
-        combinations_flattened = features.reshape(-1, features.shape[-1]) 
-        good_rows = ~np.any(np.isnan(combinations_flattened), axis=1)
+        combinations_flattened = features.reshape(-1, features.shape[-1]) # shape (nevents * ncomb, nfeatures)
+        good_rows = ~np.any(np.isnan(combinations_flattened), axis=1) # boolean array to mask combinations_flattened
 
         scores[good_rows] = self.trained_model.predict_proba(combinations_flattened[good_rows])[:,1]
-        scores = scores.reshape(features.shape[0], features.shape[1]) # reshape back to (nevents, ncomb)
+        scores = scores.reshape(len(usetest), features.shape[1]) # reshape back to (nevents, ncomb)
         best_combination_indices = np.argmax(scores, axis=1) # shape (nevents,)
         best_m1_idx = self.m1_idx[best_combination_indices]
         best_m2_idx = self.m2_idx[best_combination_indices]
