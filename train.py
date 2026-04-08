@@ -4,25 +4,30 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 import awkward as ak
-from Classifier import FinalModel, pt
+from Classifier import FinalModel, pt, InvariantMassSelector
 from config import PROCESSED_SAMPLES_PATH, MODEL_PERFORMANCE, MODELS_DIRECTORY, MODEL_FILENAME, MASSPOINTS
 
 # Specify the mass ranges to train separate models on.
 # masspoints = [MASSPOINTS]                     # One model for all masspoints
 masspoints = [[mass] for mass in MASSPOINTS] # A separate model for each masspoint.
+# masspoints = [[300]]
 
-model = FinalModel(nmuons=4, njets=5)
+model = FinalModel(nmuons=3, njets=4)
 # model = pt()
+# model = InvariantMassSelector(nmuons=3, njets=4, masspoint=300)
+
+# additional_name = ""
+additional_name = "_just_pt"
+
+train_events = np.arange(8000)
+test_events = np.arange(8000, 10000)
 
 # ------ Should only need to change above this line ------ 
 def train_and_evaluate_model(model, masspoints):
-    model_name = f"{model}/M{masspoints[0]}-{masspoints[-1]}"
+    model.masspoint = masspoints[0]
+    model_name = f"{model}{additional_name}/M{masspoints[0]}-{masspoints[-1]}"
     model_dir = os.path.join(MODELS_DIRECTORY, model_name)
     os.makedirs(model_dir, exist_ok=True)
-
-    # Train the model on all masses simultaneously
-    train_events = np.arange(8000)
-    test_events = np.arange(8000, 10000)
 
     if model.needs_training:
         # Build the features and labels for each masspoint.
@@ -79,6 +84,9 @@ def train_and_evaluate_model(model, masspoints):
         with open(os.path.join(PROCESSED_SAMPLES_PATH, file), "rb") as f:
             events = pickle.load(f)
         mu1_idx, jet_idx, mu2_idx = model.predict(events, usetest=test_events)
+        print(np.shape(mu1_idx))
+        print(np.shape(mu2_idx))
+        print(np.shape(jet_idx))
 
         # Retention rates (i.e. fraction of events where the correct objects are in the candidate list and thus a correct selection is possible)
         # performance["retention_rate"][i]        = np.sum(np.any(labels["all_correct"][i][test_events], axis=1)) / len(test_events)

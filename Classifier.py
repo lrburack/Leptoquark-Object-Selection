@@ -77,19 +77,19 @@ class FinalModel(Classifier):
             mu_pt[:, self.m2_idx],
             # 2: jet pt
             j_pt[:, self.j_idx],
-            # 3: signal muon pt rank
-            ones * (self.m1_idx + 1).astype(np.float32),
-            # 4: creation muon pt rank
-            ones * (self.m2_idx + 1).astype(np.float32),
-            # 5: jet pt rank
-            ones * (self.j_idx + 1).astype(np.float32),
+            # # 3: signal muon pt rank
+            # ones * (self.m1_idx + 1).astype(np.float32),
+            # # 4: creation muon pt rank
+            # ones * (self.m2_idx + 1).astype(np.float32),
+            # # 5: jet pt rank
+            # ones * (self.j_idx + 1).astype(np.float32),
             # 6: dR(signal muon, jet)
             dr(mu_eta[:, self.m1_idx], mu_phi[:, self.m1_idx],
                 j_eta[:, self.j_idx],   j_phi[:, self.j_idx]),
-            # 7: dR(creation muon, jet)
+            # # 7: dR(creation muon, jet)
             dr(mu_eta[:, self.m2_idx], mu_phi[:, self.m2_idx],
                 j_eta[:, self.j_idx],   j_phi[:, self.j_idx]),
-            # 8: dR(signal muon, creation muon)
+            # # 8: dR(signal muon, creation muon)
             dr(mu_eta[:, self.m1_idx], mu_phi[:, self.m1_idx],
                 mu_eta[:, self.m2_idx], mu_phi[:, self.m2_idx]),
             # 9: invariant mass(signal muon, jet)
@@ -185,3 +185,80 @@ class pt(Classifier):
     
     def __str__(self):
         return "pt"
+    
+
+# Selects the b-jet and muon with the closest invariant mass to the proposal mass
+# Selects the initial state muon as the highest pt muon (excluding the selected LQ muon)
+class InvariantMassSelector(Classifier):
+    """Selects the b-jet and muon with the closest invariant mass to the proposal mass.
+    Selects the initial state muon as the highest pt muon (excluding the selected LQ muon)."""
+
+    def __init__(self, nmuons, njets, masspoint):
+        super().__init__(needs_training=False)
+        self.nmuons = nmuons
+        self.njets = njets
+        self.masspoint = masspoint
+
+        triplets = [(m1, j) for m1, j in product(range(nmuons), range(njets))]
+        self.triplet_indices = np.array(triplets)
+        self.m1_idx = self.triplet_indices[:, 0]
+        self.j_idx  = self.triplet_indices[:, 1]
+
+    def jet_cands(self, events):
+        jet_conditions = events["Jet_jetId"] >= 6
+        jetranks = ak.argsort(ak.where(jet_conditions, events["Jet_pt"], -1e9), axis=1, ascending=False)
+        cand_jets = ak.pad_none(jetranks, self.njets, axis=1, clip=True)
+        return ak.fill_none(cand_jets, -1)
+
+    def muon_cands(self, events):
+        muonranks = ak.argsort(events["Muon_pt"], axis=1, ascending=False)
+        cand_muons = ak.pad_none(muonranks, self.nmuons, axis=1, clip=True)
+        return ak.fill_none(cand_muons, -1)
+
+    def predict(self, events, usetest=None):
+        if usetest is None:
+            usetest = np.arange(len(events["Muon_pt"]))
+
+        cand_jets = self.jet_cands(events)
+        cand_muons = self.muon_cands(events)
+
+        # --- Helper to pad and index ---
+        def get_candidate_properties(arr, cands):
+            maxlength = ak.max(ak.num(arr, axis=1))
+            padded = ak.pad_none(arr, maxlength + 1, axis=1)
+            return padded[np.arange(len(padded))[:, None], cands]
+
+        mu_pt  = get_candidate_properties(events["Muon_pt"], cand_muons)[usetest]
+        mu_eta = get_candidate_properties(events["Muon_eta"], cand_muons)[usetest]
+        mu_phi = get_candidate_properties(events["Muon_phi"], cand_muons)[usetest]
+
+        j_pt  = get_candidate_properties(events["Jet_pt"], cand_jets)[usetest]
+        j_eta = get_candidate_properties(events["Jet_eta"], cand_jets)[usetest]
+        j_phi = get_candidate_properties(events["Jet_phi"], cand_jets)[usetest]
+
+        # Compute invariant mass for signal muon + jet for every triplet combination
+        # shape: (nevents, ncomb)
+        mass_m1_j = invariant_mass(
+            mu_pt[:, self.m1_idx], mu_eta[:, self.m1_idx], mu_phi[:, self.m1_idx],
+            j_pt[:, self.j_idx],   j_eta[:, self.j_idx],   j_phi[:, self.j_idx],
+        )
+
+        # Distance from the target mass; treat NaN combos as infinitely far
+        distance = np.abs(mass_m1_j - self.masspoint)
+        distance = np.where(np.isnan(distance), 1e9, distance)
+
+        # Best combination = smallest distance to masspoint
+        best_combination_indices = np.argmin(distance, axis=1)
+
+        best_m1_idx = self.m1_idx[best_combination_indices]
+        best_j_idx  = self.j_idx[best_combination_indices]
+
+        mu_pt_masked = np.array(ak.fill_none(mu_pt, -1e9))
+        nevents = len(usetest)
+        mu_pt_masked[np.arange(nevents), best_m1_idx] = -np.inf
+        best_m2_idx = np.argmax(mu_pt_masked, axis=1)
+
+        return cand_muons[usetest, best_m1_idx], cand_jets[usetest, best_j_idx], cand_muons[usetest, best_m2_idx]
+
+    def __str__(self):
+        return "InvMass_{}mu_{}jet".format(self.nmuons, self.njets, self.masspoint)

@@ -4,13 +4,13 @@ import os
 from config import MODELS_DIRECTORY, MODEL_FILENAME, MASSPOINTS, MODEL_PERFORMANCE, PERFORMANCE_PLOT_PATH
 import numpy as np
 
-model_names = ["NN_4mu_5jet", "NN_3mu_4jet", "NN_2mu_3jet", "pt"]
+model_names = ["pt", "NN_3mu_4jet", "NN_3mu_4jet_just_pt"]
 # Name compare_model1_model2_
 figname = os.path.join(PERFORMANCE_PLOT_PATH, "compare")
 for model_name in model_names: figname += f"_{model_name}"
 
-fig, ax = plt.subplots()
-fig2, axs = plt.subplots(3, 1, sharex=True)
+fig, ax = plt.subplots(figsize=(5,4))
+fig2, axs = plt.subplots(3, 1, sharex=True, figsize=(5,4))
 for model_name in model_names:
     masspoint = np.array(MASSPOINTS)
     # Store selection rates for all objects, lq muon, creation muon, lq jet 

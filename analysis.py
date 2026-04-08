@@ -6,6 +6,7 @@ import os
 import awkward as ak
 import re
 from helpers import dr, invariant_mass
+from config import ANALYSIS_PLOT_PATH, PROCESSED_SAMPLES_PATH
 
 # sample file: processed_Signal_LQToBMu_M_500_single.root
 # selected objects: ["gen_lq_muon", "gen_creation_muon", "gen_lq_quark", "reco_lq_muon", "reco_creation_muon", "reco_lq_jet"]
@@ -13,8 +14,8 @@ from helpers import dr, invariant_mass
 file = sys.argv[1]
 mass = int(re.search(r"_M_(\d+)_", file).group(1))
 
-signal_path = "/Users/lrburack/Documents/CERN/Leptoquark/processed"
-outpath = "figures/"
+signal_path = PROCESSED_SAMPLES_PATH
+outpath = os.path.join(ANALYSIS_PLOT_PATH, f"M{mass}")
 os.makedirs(outpath, exist_ok=True)
 
 with open(os.path.join(signal_path, file), "rb") as f:
@@ -22,13 +23,6 @@ with open(os.path.join(signal_path, file), "rb") as f:
 
 nevents = len(processed["GenPart_pt"])
 allevents = np.arange(nevents)
-
-multiple_masspoint_data_path = os.path.join(outpath, "multiple_masspoint_data.pkl")
-if not os.path.exists(multiple_masspoint_data_path):
-    with open(multiple_masspoint_data_path, "wb") as f:
-        pickle.dump({}, f)
-with open(multiple_masspoint_data_path, "rb") as f:
-    multiple_masspoint_data = pickle.load(f)
 
 styles = {
     'gen': {"color": "blue"},
@@ -41,49 +35,54 @@ def getobj(b, selb):
     return processed[b][allevents, processed[selb]]
 
 # Create a histogram showing the pt rank of the muon in each event
-figname = f"muonrank_{file[:-5]}"
-fig, ax1 = plt.subplots(1)
-fig.suptitle(figname)
+figname = "muonrank.png"
+fig, ax1 = plt.subplots(1, figsize=(4.5,3))
+fig.suptitle(f"{mass}GeV Leptoquark")
 bins = np.arange(5) + 0.5
 
 final_state_muons = (np.abs(processed["GenPart_pdgId"]) == 13) & (processed["GenPart_status"] == 1)
 gen_lq_muon_rank = ak.sum(processed["GenPart_pt"][final_state_muons] > getobj("GenPart_pt", "gen_lq_muon"), axis=1) + 1
 gen_creation_muon_rank = ak.sum(processed["GenPart_pt"][final_state_muons] > getobj("GenPart_pt", "gen_creation_muon"), axis=1) + 1
-ax1.hist(gen_lq_muon_rank, bins=bins, label="gen lq muon", histtype='step', density=True, **styles["gen"])
-ax1.hist(gen_creation_muon_rank, bins=bins, label="gen creation muon", histtype='step', density=True, **styles["alt gen"])
+ax1.hist(gen_lq_muon_rank, bins=bins, label="LQ-muon (Gen)", histtype='step', density=True, **styles["gen"])
+ax1.hist(gen_creation_muon_rank, bins=bins, label="IS-muon (Gen)", histtype='step', density=True, **styles["alt gen"])
 ax1.set_ylabel("Fraction of events")
-ax1.set_xlabel("pt rank")
+ax1.set_xlabel(r"$p_T$ rank")
 ax1.set_xticks(np.array([0, 1, 2, 3, 4, 5]))
-ax1.legend()
+ax1.set_ylim([0,1])
 
 candidate_muons = processed["Muon_pt"]
 reco_lq_muon_rank = ak.sum(candidate_muons > getobj("Muon_pt", "reco_lq_muon"), axis=1) + 1
 reco_creation_muon_rank = ak.sum(candidate_muons > getobj("Muon_pt", "reco_creation_muon"), axis=1) + 1
-ax1.hist(reco_lq_muon_rank, bins=bins, label="reco lq muon", histtype='step', density=True, **styles["reco"])
-ax1.hist(reco_creation_muon_rank, bins=bins, label="reco creation muon", histtype='step', density=True, **styles["alt reco"])
+ax1.hist(reco_lq_muon_rank, bins=bins, label="LQ-muon (Reco)", histtype='step', density=True, **styles["reco"])
+ax1.hist(reco_creation_muon_rank, bins=bins, label="IS-muon (Reco)", histtype='step', density=True, **styles["alt reco"])
+ax1.legend()
 
+fig.tight_layout()
 plt.savefig(os.path.join(outpath, figname))
 
 LQ_id = 9000007
 
-figname = f"jetrank_{file[:-5]}"
-fig, ax1 = plt.subplots(1)
+figname = "jetrank.png"
+fig, ax1 = plt.subplots(1, figsize=(4.5,3))
+fig.suptitle(f"{mass}GeV Leptoquark")
 candidate_quarks = processed["GenPart_pt"][np.abs(processed["GenPart_pdgId"]) <= 8]
 gen_lq_quark_rank = ak.sum(candidate_quarks > getobj("GenPart_pt", "gen_lq_quark"), axis=1) + 1
-ax1.hist(gen_lq_quark_rank, bins=bins, label="gen lq quark", histtype='step', density=True, **styles["gen"])
+ax1.hist(gen_lq_quark_rank, bins=bins, label="LQ-jet (Gen)", histtype='step', density=True, **styles["gen"])
 
 candidate_jets = processed["Jet_pt"][processed["Jet_jetId"] >= 6]
 reco_lq_jet_rank = ak.sum(candidate_jets > getobj("Jet_pt", "reco_lq_jet"), axis=1) + 1
-ax1.hist(reco_lq_jet_rank, bins=bins, label="reco lq jet", histtype='step', density=True, **styles["reco"])
-
+ax1.hist(reco_lq_jet_rank, bins=bins, label="LQ-jet (Reco)", histtype='step', density=True, **styles["reco"])
+# ax1.set_ylim([0,1])
 ax1.set_xticks(np.array([0, 1, 2, 3, 4, 5]))
 ax1.set_ylabel("Fraction of events")
-ax1.set_xlabel("pt rank")
+ax1.set_xlabel(r"$p_T$ rank")
 ax1.legend()
+ax1.set_ylim([0,1])
 
+fig.tight_layout()
 plt.savefig(os.path.join(outpath, figname))
 
-figname = f"check_recojet_matching_{file[:-5]}"
+figname = "check_recojet_matching.png"
 fig, axs = plt.subplots(1,3)
 axs[0].set_title("eta")
 axs[1].set_title("phi")
@@ -93,7 +92,7 @@ axs[1].hist(np.clip(getobj("GenPart_phi", "gen_lq_quark") - getobj("Jet_phi", "r
 axs[2].hist(np.clip(getobj("GenPart_pt", "gen_lq_quark") - getobj("Jet_pt", "reco_lq_jet"), -30, 100), histtype="step", label="gen lq quark", **styles["gen"])
 plt.savefig(os.path.join(outpath, figname))
 
-figname = f"ptselection_{file[:-5]}"
+figname = "ptselection.png"
 fig, [ax1, ax2] = plt.subplots(1, 2)
 fig.suptitle(figname)
 
@@ -127,7 +126,7 @@ ax2.set_title("Reco information")
 fig.tight_layout()
 plt.savefig(os.path.join(outpath, figname))
 
-figname = f"muonetadistribution_{file[:-5]}.png"
+figname = f"muonetadistribution.png"
 fig, ax = plt.subplots(1)
 bins = np.linspace(-3, 3, 21)
 ax.hist(getobj("GenPart_eta", "gen_lq_muon"), bins=bins, histtype="step", label="LQ Muon", **styles["gen"])
@@ -137,7 +136,7 @@ ax.set_ylabel("Number of events")
 ax.legend()
 plt.savefig(os.path.join(outpath, figname))
 
-figname = f"drdistribution_{file[:-5]}.png"
+figname = f"drdistribution.png"
 fig, ax = plt.subplots(1)
 bins = np.linspace(0, 6, 16)
 quark_lq_muon_dr = dr(getobj("GenPart_eta", "gen_lq_quark"), getobj("GenPart_phi", "gen_lq_quark"),
@@ -157,7 +156,7 @@ ax.set_ylabel("Number of events")
 ax.legend()
 plt.savefig(os.path.join(outpath, figname))
 
-figname = f"pt_{file[:-5]}.png"
+figname = f"pt.png"
 fig, ax = plt.subplots(1)
 ax.hist(getobj("GenPart_pt", "gen_lq_muon"), histtype="step", label="Gen LQ Muon", **styles["gen"])
 ax.hist(getobj("Muon_pt", "reco_lq_muon"), histtype="step", label="Reco LQ Muon", **styles["reco"])
@@ -176,7 +175,7 @@ reco_inv_mass = invariant_mass(
     getobj("Muon_pt", "reco_lq_muon"), getobj("Muon_eta", "reco_lq_muon"), getobj("Muon_phi", "reco_lq_muon"),
     getobj("Jet_pt", "reco_lq_jet"), getobj("Jet_eta", "reco_lq_jet"), getobj("Jet_phi", "reco_lq_jet"), m2=0.10566
 )
-figname = f"invariantmass_{file[:-5]}.png"
+figname = f"invariantmass.png"
 fig, [ax1, ax2] = plt.subplots(1,2)
 ax1.hist(gen_inv_mass, histtype="step", label="Gen LQ Muon", **styles["gen"])
 ax1.hist(reco_inv_mass, histtype="step", label="Reco LQ Muon", **styles["reco"])
@@ -187,7 +186,7 @@ ax1.set_ylabel("Number of events")
 ax1.legend()
 plt.savefig(os.path.join(outpath, figname))
 
-figname = f"recommended_dr_cut_{file[:-5]}.png"
+figname = f"recommended_dr_cut.png"
 fig, ax = plt.subplots(1)
 gen_quark_lq_muon_dr = dr(getobj("GenPart_eta", "gen_lq_quark"), getobj("GenPart_phi", "gen_lq_quark"),
                       getobj("GenPart_eta", "gen_lq_muon"), getobj("GenPart_phi", "gen_lq_muon"))
@@ -215,6 +214,52 @@ ax.set_ylabel("Efficiency")
 ax.set_title(figname)
 ax.legend()
 plt.savefig(os.path.join(outpath, figname))
+
+# Plot for invariant mass rankings
+figname = "invariant_mass_closeness.png"
+recoranks = np.zeros(nevents)
+reco_inv_mass = invariant_mass(
+    getobj("Muon_pt", "reco_lq_muon"), getobj("Muon_eta", "reco_lq_muon"), getobj("Muon_phi", "reco_lq_muon"),
+    getobj("Jet_pt", "reco_lq_jet"), getobj("Jet_eta", "reco_lq_jet"), getobj("Jet_phi", "reco_lq_jet")
+)
+print("waiting...")
+for i in range(1000):
+    for mu in range(len(processed["Muon_pt"][i])):
+        for jet in range(len(processed["Jet_pt"][i])):
+            if mu == processed["reco_lq_muon"][i] and jet == processed["reco_lq_jet"][i]:
+                continue
+            inv_mass = invariant_mass(
+                processed["Muon_pt"][i][mu], processed["Muon_eta"][i][mu], processed["Muon_phi"][i][mu],
+                processed["Jet_pt"][i][jet], processed["Jet_eta"][i][jet], processed["Jet_phi"][i][jet]
+            )
+            if inv_mass > reco_inv_mass[i]:
+                recoranks[i] += 1
+
+genranks = np.zeros(nevents)
+gen_inv_mass = invariant_mass(
+    getobj("GenPart_pt", "gen_lq_muon"), getobj("GenPart_eta", "gen_lq_muon"), getobj("GenPart_phi", "gen_lq_muon"),
+    getobj("GenPart_pt", "gen_lq_quark"), getobj("GenPart_eta", "gen_lq_quark"), getobj("GenPart_phi", "gen_lq_quark"), m2=0.10566
+)
+print("waiting...")
+for i in range(1000):
+    for mu in range(len(processed["GenPart_pt"][i])):
+        for jet in range(len(processed["GenPart_pt"][i])):
+            if mu == processed["gen_lq_muon"][i] and jet == processed["gen_lq_quark"][i]:
+                continue
+            inv_mass = invariant_mass(
+                processed["Muon_pt"][i][mu], processed["Muon_eta"][i][mu], processed["Muon_phi"][i][mu],
+                processed["Jet_pt"][i][jet], processed["Jet_eta"][i][jet], processed["Jet_phi"][i][jet]
+            )
+            if inv_mass > reco_inv_mass[i]:
+                genranks[i] += 1
+
+fig, ax = plt.subplots(1)
+bins = np.arange(5) + 0.5
+counts, _ = np.histogram(recoranks, bins)        
+ax.stairs(counts / np.sum(counts), bins)
+counts, _ = np.histogram(genranks, bins)        
+ax.stairs(counts / np.sum(counts), bins)
+fig.savefig(os.path.join(outpath, figname))
 
 # Save the recommended cut for this mass point
 # path = os.path.join(outpath, "recommended_dr_cuts.pkl")
