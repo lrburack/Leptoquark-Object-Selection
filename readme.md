@@ -2,7 +2,7 @@
 This codebase is part of a search at the Compact Muon Solenoid for a leptoquark decaying to a muon and a b-jet.
 
 <p align="center">
-<img src="image.png" width="200"/>
+<img src="gluon-induced-single-leptoquark.png" width="200"/>
 
 </p>
 <p align="center">
