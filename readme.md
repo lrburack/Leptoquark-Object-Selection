@@ -22,7 +22,7 @@ The kinematics of these three objects are the primary discriminating variables a
 Steps:
 
 0. Change the paths in config.py
-1. ground_truth.py uses generator level information to tag determine the true LQ-muon, LQ-jet, and initial state muon. analysis.py plots some kinematics to help inform the classification strategy
+1. ground_truth.py uses generator level information to determine the true LQ-muon, LQ-jet, and initial state muon. analysis.py plots some kinematics to help inform the classification strategy
 2. train.py trains and tests a model on the ground-truth tagged data. plot_performance.py plots the performance of these algorithms
 3. run_selection.py adds classification branches to a root file with the indices of the predicted LQ-muon, LQ-jet, and initial state muon
 
